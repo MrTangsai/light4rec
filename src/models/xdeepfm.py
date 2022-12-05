@@ -8,14 +8,13 @@ from ..layers import CIN
 class xDeepFM(BaseModel):
     def __init__(
         self,
-        data_dir,
-        label_name='label',
+        data_cfg,
         cin_layer_size=(256, 128),
         dnn_hidden_size=(256, 256),
         embedding_dim=4,
         dnn_dropout=0,
     ) -> None:
-        super().__init__(data_dir, label_name, embedding_dim, linear=True)
+        super().__init__(data_cfg, embedding_dim, linear=True)
         self.cin_layer_size = cin_layer_size
         self.dnn_hidden_size = dnn_hidden_size
         self.dnn_dropout = dnn_dropout

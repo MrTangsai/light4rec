@@ -1,6 +1,6 @@
 import torch
 import pytorch_lightning as pl
-from light4rec.models import xDeepFM, IPNN
+from src.models import xDeepFM, IPNN
 
 from pytorch_lightning.callbacks import RichProgressBar
 from pytorch_lightning.callbacks.progress.rich_progress import RichProgressBarTheme
@@ -22,8 +22,8 @@ progress_bar = RichProgressBar(
 )
 device = torch.device('cuda:0')
 
-model = IPNN(
-    'data/criteo_sample.txt',
+model = xDeepFM(
+    'cfg/data/criteo.yaml',
 ).double()
 
 # train model

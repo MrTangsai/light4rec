@@ -10,6 +10,7 @@
 import os
 import warnings
 
+import yaml
 import pandas as pd
 import pytorch_lightning as pl
 import torch
@@ -28,37 +29,24 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 class BaseModel(pl.LightningModule):
     def __init__(
         self,
-        data_dir,
-        label_name='name',
+        data_cfg,
         batch_size=16,
         var_batch_size=1000,
         embedding_dim=4,
         linear=False,
-        **kwargs
     ) -> None:
         super(BaseModel, self).__init__()
-        self.data_dir = data_dir
-        self.label_name = label_name
+        self.data_cfg = yaml.load(open(data_cfg, 'r'), yaml.FullLoader)
         self.batch_size = batch_size
         self.var_batch_size = var_batch_size
-        self.kwargs = kwargs
+
         self.data_train = None
         self.data_val = None
         self.data_test = None
         self.auc_val = torchmetrics.AUROC()
         self.auc_test = torchmetrics.AUROC()
-        (
-            self.columns,
-            self.sparse_features,
-            self.dense_features,
-            self.data,
-        ) = self._load_data()
-        self.sparse_features = {
-            j: i for i, j in enumerate(self.columns) if j.startswith('C')
-        }
-        self.dense_features = {
-            j: i for i, j in enumerate(self.columns) if j.startswith('I')
-        }
+
+        self._load_data()
 
         self.embedding_dict = nn.ModuleDict(
             {
@@ -92,29 +80,72 @@ class BaseModel(pl.LightningModule):
         pass
 
     def _load_data(self):
-        sep = self.kwargs.get('sep')
-        data = pd.read_csv(self.data_dir, sep=sep)
+        data_dir = self.data_cfg.get('data_dir')
+        if isinstance(data_dir, str):
+            if data_dir.endswith('.txt') or data_dir.endswith('.csv'):
+                data = pd.read_csv(data_dir, sep=self.data_cfg.get('sep'))
+            else:
+                raise TypeError('data file not exists')
+        elif isinstance(data_dir, list):
+            for d in data_dir:
+                # todo
+                if 'train' in d and (d.endswith('.txt') or d.endswith('.csv')):
+                    data = pd.read_csv(d, sep=self.data_cfg.get('sep'), nrows=4e5)
+                    break
 
-        sparse_features = ['C' + str(i) for i in range(1, 27)]
-        dense_features = ['I' + str(i) for i in range(1, 14)]
-        features = data.columns[1:].tolist()
+        self.sparse_features = []
+        self.dense_features = []
 
-        data[sparse_features] = data[sparse_features].fillna(
-            '-1',
-        )
-        data[dense_features] = data[dense_features].fillna(
-            0,
-        )
-        target = ['label']
-        data[target] = data[target].astype(float)
+        for col in self.data_cfg.get('feature_cols'):
+            if col['type'] == 'dense':
+                self.dense_features += col['name']
+                if col.get('fillna'):
+                    data[self.dense_features] = self._fillna(
+                        data[self.dense_features], col['fillna'], 0
+                    )
+                if col.get('encoder'):
+                    data[self.dense_features] = self._encode(
+                        data[self.dense_features], col['encoder']
+                    )
+            if col['type'] == 'categorical':
+                self.sparse_features += col['name']
+                if col.get('fillna'):
+                    data[self.sparse_features] = self._fillna(
+                        data[self.sparse_features], col['fillna'], '-1'
+                    )
+                if col.get('encoder'):
+                    data[self.sparse_features] = self._encode(
+                        data[self.sparse_features], col['encoder']
+                    )
 
-        for feat in sparse_features:
-            lbe = LabelEncoder()
-            data[feat] = lbe.fit_transform(data[feat])
-        mms = MinMaxScaler(feature_range=(0, 1))
-        data[dense_features] = mms.fit_transform(data[dense_features])
+        self.columns = data.columns.tolist()
+        label = self.data_cfg['label_col']
+        self.label_name = label['name']
+        if label['dtype'] == 'float':
+            data[self.label_name] = data[self.label_name].astype(float)
 
-        return features, sparse_features, dense_features, data
+        self.columns.remove(self.label_name)
+        self.sparse_features = {
+            j: i for i, j in enumerate(self.columns) if j in self.sparse_features
+        }
+        self.dense_features = {
+            j: i for i, j in enumerate(self.columns) if j in self.dense_features
+        }
+        self.data = data
+
+    def _fillna(self, raw, type, constant):
+        if type == 'constant':
+            return raw.fillna(constant)
+
+    def _encode(self, raw, type):
+        if type == 'LabelEncoder':
+            for feat in raw.columns:
+                lbe = LabelEncoder()
+                raw[feat] = lbe.fit_transform(raw[feat])
+        if type == 'MinMaxScaler':
+            mms = MinMaxScaler(feature_range=(0, 1))
+            raw = mms.fit_transform(raw)
+        return raw
 
     def setup(self, stage: str) -> None:
         """Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
@@ -197,24 +228,20 @@ class BaseModel(pl.LightningModule):
 class SquenceModel(BaseModel):
     def __init__(
         self,
-        data_dir,
-        label_name='name',
+        data_cfg,
         din_target_field=None,
         din_sequence_field=None,
         batch_size=16,
         var_batch_size=1000,
         embedding_dim=4,
         linear=False,
-        **kwargs
     ) -> None:
         super().__init__(
-            data_dir,
-            label_name,
+            data_cfg,
             batch_size,
             var_batch_size,
             embedding_dim,
             linear,
-            **kwargs
         )
         if not isinstance(din_target_field, list):
             din_target_field = [din_target_field]

@@ -13,8 +13,8 @@ from .basemodel import BaseModel
 
 
 class IPNN(BaseModel):
-    def __init__(self, data_dir, label_name='label', embedding_dim=4) -> None:
-        super(IPNN, self).__init__(data_dir, label_name, embedding_dim)
+    def __init__(self, data_cfg, embedding_dim=4) -> None:
+        super(IPNN, self).__init__(data_cfg, embedding_dim)
         dnn_input = int(
             len(self.dense_features)
             + len(self.sparse_features) * (len(self.sparse_features) - 1) / 2
