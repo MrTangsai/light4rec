@@ -1,5 +1,6 @@
 import torch
 import pytorch_lightning as pl
+from src.dataset import BaseRecData
 from src.models import xDeepFM, IPNN
 
 from pytorch_lightning.callbacks import RichProgressBar
@@ -22,9 +23,8 @@ progress_bar = RichProgressBar(
 )
 device = torch.device('cuda:0')
 
-model = xDeepFM(
-    'cfg/data/criteo.yaml',
-).double()
+data = BaseRecData('cfg/data/criteo.yaml')
+model = xDeepFM(data.featuremap).double()
 
 # train model
 trainer = pl.Trainer(
@@ -39,5 +39,5 @@ trainer = pl.Trainer(
         EarlyStopping(monitor="val_loss", mode="min"),
     ],
 )
-trainer.fit(model=model)
-trainer.test(model)
+trainer.fit(model=model, datamodule=data)
+trainer.test(model, datamodule=data)
