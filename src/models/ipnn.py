@@ -13,24 +13,27 @@ from .basemodel import BaseModel
 
 
 class IPNN(BaseModel):
-    def __init__(self, data_cfg, embedding_dim=4) -> None:
-        super(IPNN, self).__init__(data_cfg, embedding_dim)
+    def __init__(self, featuremap, embedding_dim=4) -> None:
+        super(IPNN, self).__init__(featuremap, embedding_dim)
         dnn_input = int(
-            len(self.dense_features)
-            + len(self.sparse_features) * (len(self.sparse_features) - 1) / 2
-            + embedding_dim * len(self.sparse_features)
+            self.dense_features
+            + self.sparse_features * (self.sparse_features - 1) / 2
+            + embedding_dim * self.sparse_features
         )
         self.dnn = nn.Sequential(nn.Linear(dnn_input, 128), nn.Linear(128, 128))
         self.dnn_linear = nn.Linear(128, 1)
 
     def forward(self, x):
         dense_value_list = [
-            x[:, index].view(-1, 1) for index in self.dense_features.values()
+            x[:, v['index'][0]].view(-1, 1)
+            for v in self.features_attr.values()
+            if v['type'] == 'dense'
         ]
 
         sparse_embedding_list = [
-            self.embedding_dict[feat](x[:, index].view(-1, 1).long())
-            for feat, index in self.sparse_features.items()
+            self.embedding_dict[feat](x[:, v['index'][0]].view(-1, 1).long())
+            for feat, v in self.features_attr.items()
+            if v['type'] == 'categorical'
         ]
 
         linear_signal = torch.flatten(

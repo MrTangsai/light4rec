@@ -17,6 +17,7 @@ class FeatureMap(
             'num_features',
             'sparse_features',
             'dense_features',
+            'sequence_features',
             'input_length',
             'features_attr',
         ],
@@ -38,6 +39,7 @@ class FeatureMap(
         num_features=0,
         sparse_features=0,
         dense_features=0,
+        sequence_features=0,
         input_length=0,
         features_attr=OrderedDict(),
     ):
@@ -47,6 +49,7 @@ class FeatureMap(
             num_features,
             sparse_features,
             dense_features,
+            sequence_features,
             input_length,
             features_attr,
         )

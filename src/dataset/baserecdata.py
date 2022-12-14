@@ -6,16 +6,23 @@
 @Version      :1.0
 '''
 
+import threading
+import time
 from collections import OrderedDict
+from pathlib import Path
 
+import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
 import torch.utils.data as Data
 import yaml
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
+
+from .encoders import Tokenizer
 from .features import FeatureMap
 
 
@@ -28,8 +35,8 @@ class BaseRecData(pl.LightningDataModule):
     ) -> None:
         super().__init__()
         self.data_cfg = yaml.load(open(data_cfg, 'r'), yaml.FullLoader)
-        self._load_data()
-
+        self.encoders = OrderedDict()
+        self._extract_featuremap()
         self.batch_size = batch_size
         self.var_batch_size = var_batch_size
         self.data_train = None
@@ -51,72 +58,50 @@ class BaseRecData(pl.LightningDataModule):
         """
         pass
 
-    def _load_data(self):
-        data_dir = self.data_cfg.get('data_dir')
-        if isinstance(data_dir, str):
-            if data_dir.endswith('.txt') or data_dir.endswith('.csv'):
-                data = pd.read_csv(
-                    data_dir, sep=self.data_cfg.get('sep'), engine='python'
-                )
-            else:
-                raise TypeError('data file not exists')
-        elif isinstance(data_dir, list):
-            for d in data_dir:
-                # todo
-                if 'train' in d and (d.endswith('.txt') or d.endswith('.csv')):
-                    data = pd.read_csv(d, sep=self.data_cfg.get('sep'), nrows=4e5)
-                    break
-
-        self.columns = data.columns.tolist()
-        label = self.data_cfg['label_col']
-        self.label_name = label['name']
-        self.label = data[self.label_name].values
-        if label['dtype'] == 'float':
-            self.label = self.label.astype(float)
-        self.columns.remove(self.label_name)
-
+    def _extract_featuremap(self):
+        data = self._read_data()
+        self._init_encoders()
+        data = data if 'chunksize' in data.__dict__ else [data]
         features_attr = dict()
-        self.encoders = OrderedDict()
-        self.array = []
-
-        index, dense, sparse = 0, 0, 0
+        index, dense, sparse, sequence = 0, 0, 0, 0
         for cols in self.data_cfg.get('feature_cols'):
-            if cols['type'] == 'dense':
-                for col in cols['name']:
-                    features_attr[col] = {}
-                    if cols.get('fillna'):
-                        data[col] = self._fillna(data[col], cols['fillna'], 0)
-                    if cols.get('encoder'):
-                        out, encoder = self._encode(data[col], cols['encoder'])
-                        self.encoders[col] = encoder
-                    else:
-                        out = data[col].values.reshape(-1, 1)
-                    self.array.append(out)
-                    features_attr[col]['type'] = 'dense'
+            cols_list = (
+                cols['name'] if isinstance(cols['name'], list) else [cols['name']]
+            )
+            for col in cols_list:
+                features_attr[col] = {}
+                if cols['type'] == 'dense':
+                    features_attr[col]['type'] = cols['type']
                     features_attr[col]['index'] = [index, index + 1]
                     index += 1
                     dense += 1
-            if cols['type'] == 'categorical':
-                for col in cols['name']:
-                    features_attr[col] = {}
-                    if cols.get('fillna'):
-                        data[col] = self._fillna(data[col], cols['fillna'], '-1')
-                    if cols.get('encoder'):
-                        out, encoder = self._encode(data[col], cols['encoder'])
-                        self.encoders[col] = encoder
-                        features_attr[col]['size'] = len(encoder.classes_)
-                    else:
-                        out = data[col].values.reshape(-1, 1)
-                    self.array.append(out)
-                    features_attr[col]['type'] = 'categorical'
+                elif cols['type'] == 'categorical':
+                    features_attr[col]['type'] = cols['type']
                     features_attr[col]['index'] = [index, index + 1]
                     index += 1
                     sparse += 1
-
+                elif cols['type'] == 'sequence':
+                    features_attr[col]['type'] = cols['type']
+                    features_attr[col]['index'] = [index, index + cols['max_len']]
+                    features_attr[col]['share_embedding'] = cols.get('share_embedding')
+                    index += cols['max_len']
+                    sequence += 1
+        for d in data:
+            self._fit_encoders(d)
+        for name, encoder in self.encoders.items():
+            if isinstance(encoder, Tokenizer):
+                encoder.build_vocab()
+                features_attr[name]['size'] = self.encoders[name].vocab_size
+                if encoder.share_embedding:
+                    encoder.vocab = self.encoders[encoder.share_embedding].vocab
+                    encoder.vocab_size = self.encoders[
+                        encoder.share_embedding
+                    ].vocab_size
         self.featuremap = FeatureMap(
-            num_fields=dense + sparse,
+            num_fields=dense + sparse + sequence,
             dense_features=dense,
             sparse_features=sparse,
+            sequence_features=sequence,
             num_features=sum(
                 [i['size'] for i in features_attr.values() if i.get('size')]
             ),
@@ -124,28 +109,109 @@ class BaseRecData(pl.LightningDataModule):
             features_attr=features_attr,
         )
 
+    def _init_encoders(self):
+        for cols in self.data_cfg.get('feature_cols'):
+            if cols.get('encoder'):
+                cols_list = (
+                    cols['name'] if isinstance(cols['name'], list) else [cols['name']]
+                )
+                for col in cols_list:
+                    if cols['type'] == 'dense':
+                        self.encoders[col] = MinMaxScaler(feature_range=(0, 1))
+                    elif cols['type'] == 'categorical':
+                        self.encoders[col] = Tokenizer(na_value='-1')
+                    elif cols['type'] == 'sequence':
+                        self.encoders[col] = (
+                            Tokenizer(
+                                na_value='-1', share_embedding=cols['share_embedding']
+                            )
+                            if cols.get('share_embedding')
+                            else Tokenizer(na_value='-1')
+                        )
+                    else:
+                        raise NotImplementedError
+
+    def _fit_encoders(self, data):
+        print_thread('start')
+        for cols in self.data_cfg.get('feature_cols'):
+            cols_list = (
+                cols['name'] if isinstance(cols['name'], list) else [cols['name']]
+            )
+            for col in cols_list:
+                if cols['type'] == 'dense':
+                    if cols.get('encoder'):
+                        raw = data[col].fillna(0)
+                        self.encoders[col].partial_fit(raw.values.reshape(-1, 1))
+                elif cols['type'] == 'categorical':
+                    if cols.get('encoder'):
+                        raw = data[col].fillna('-1')
+                        self.encoders[col].partial_fit(raw.values)
+                elif cols['type'] == 'sequence':
+                    if cols.get('encoder') and not cols.get('share_embedding'):
+                        raw = data[col]
+                        self.encoders[col].partial_fit(
+                            raw.str.split(cols['splitter'], expand=True)
+                            .fillna('-1')
+                            .values.flatten()
+                        )
+                else:
+                    raise NotImplementedError
+        print_thread('end')
+
+    def _fit_array(self):
+        data = self._read_data()
+
+        self.array = []
+        self.label = data[self.label_name].values
+        if self.data_cfg['label_col'].get('dtype') == 'float':
+            self.label = self.label.astype(float)
+
+        for cols in self.data_cfg.get('feature_cols'):
+            for col in cols['name']:
+                if cols['type'] == 'dense':
+                    out = data[col].fillna(0).values.reshape(-1, 1)
+                    if col in self.encoders:
+                        out = self.encoders[col].transform(out)
+                elif cols['type'] == 'categorical':
+                    if cols.get('encoder'):
+                        out = data[col].fillna('-1')
+                        if col in self.encoders:
+                            out = self.encoders[col].encode_category(out)
+                else:
+                    out = data[col].values.reshape(-1, 1)
+                self.array.append(out)
+
         self.array = np.hstack(self.array)
 
-        # self.sparse_features = {
-        #     j: i for i, j in enumerate(self.columns) if j in self.sparse_features
-        # }
-        # self.dense_features = {
-        #     j: i for i, j in enumerate(self.columns) if j in self.dense_features
-        # }
+    def _read_data(self):
+        train_dir = Path(self.data_cfg.get('data_dir')).joinpath(
+            self.data_cfg.get('train_data')
+        )
+        if not train_dir.exists():
+            raise FileNotFoundError(f"No such file or directory: '{train_dir}'")
+        self.sep = self.data_cfg.get('sep')
+        self.chunksize = self.data_cfg.get('chunksize')
+        self.label_name = self.data_cfg['label_col']['name']
+        if train_dir.suffix in ['.csv', '.txt']:
+            self.columns = pd.read_csv(
+                train_dir, sep=self.sep, nrows=0
+            ).columns.to_list()
+            self.columns.remove(self.label_name)
 
-    def _fillna(self, raw, type, constant):
-        if type == 'constant':
-            return raw.fillna(constant)
+            data = eval(self.data_cfg.get('reply', 'pd')).read_csv(
+                train_dir,
+                sep=self.sep,
+                dtype={
+                    j: i['dtype']
+                    for i in self.data_cfg['feature_cols']
+                    for j in (i['name'] if isinstance(i['name'], list) else [i['name']])
+                },
+                chunksize=self.chunksize,
+            )
+        else:
+            raise NotImplementedError
 
-    def _encode(self, raw, type):
-        if type == 'LabelEncoder':
-            m = LabelEncoder()
-            raw = m.fit_transform(raw.values).reshape(-1, 1)
-        elif type == 'MinMaxScaler':
-            m = MinMaxScaler(feature_range=(0, 1))
-            raw = m.fit_transform(raw.values.reshape(-1, 1))
-
-        return raw, m
+        return data
 
     def setup(self, stage: str) -> None:
         """Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
@@ -155,6 +221,7 @@ class BaseRecData(pl.LightningDataModule):
         """
         # load and split datasets only if not loaded already
         if not self.data_train and not self.data_val and not self.data_test:
+            self._fit_array()
             data = Data.TensorDataset(
                 torch.from_numpy(self.array),
                 torch.from_numpy(self.label),
@@ -173,3 +240,17 @@ class BaseRecData(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.data_test, batch_size=self.var_batch_size, shuffle=False)
+
+
+def print_thread(pos='start'):
+    t = threading.currentThread()
+    print(
+        f'{pos}:\t',
+        'ID: ',
+        t.ident,
+        'name: ',
+        t.getName(),
+        'time: ',
+        time.asctime(time.localtime(time.time())),
+        '\n',
+    )
