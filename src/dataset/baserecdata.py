@@ -11,7 +11,6 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
@@ -22,6 +21,7 @@ from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
+from ..decorators import log_filter, logger
 from .encoders import Tokenizer
 from .features import FeatureMap
 
@@ -58,6 +58,7 @@ class BaseRecData(pl.LightningDataModule):
         """
         pass
 
+    @log_filter
     def _extract_featuremap(self):
         data = self._read_data()
         self._init_encoders()
@@ -132,7 +133,6 @@ class BaseRecData(pl.LightningDataModule):
                         raise NotImplementedError
 
     def _fit_encoders(self, data):
-        print_thread('start')
         for cols in self.data_cfg.get('feature_cols'):
             cols_list = (
                 cols['name'] if isinstance(cols['name'], list) else [cols['name']]
@@ -156,7 +156,6 @@ class BaseRecData(pl.LightningDataModule):
                         )
                 else:
                     raise NotImplementedError
-        print_thread('end')
 
     def _fit_array(self):
         data = self._read_data()
@@ -198,7 +197,7 @@ class BaseRecData(pl.LightningDataModule):
             ).columns.to_list()
             self.columns.remove(self.label_name)
 
-            data = eval(self.data_cfg.get('reply', 'pd')).read_csv(
+            data = pd.read_csv(
                 train_dir,
                 sep=self.sep,
                 dtype={
@@ -254,3 +253,14 @@ def print_thread(pos='start'):
         time.asctime(time.localtime(time.time())),
         '\n',
     )
+
+
+def get_logger(name):
+    LOG_FORMAT = '%(asctime)s.%(msecs)03d %(levelname)s %(process)d %(message)s'
+    DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
+    logger.addHandler(handler)
+    return logger
