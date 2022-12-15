@@ -24,7 +24,6 @@ def log_filter(func):
         logger.info(
             f"=============  Begin: {func.__module__+'/'+func.__name__}  ============="
         )
-        logger.info(f"Args: {kwargs}")
         func(*args, **kwargs)
         logger.info(
             f"=============   End: {func.__module__+'/'+func.__name__}   =============\n"

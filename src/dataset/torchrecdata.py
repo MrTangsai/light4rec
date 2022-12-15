@@ -26,7 +26,7 @@ from .encoders import Tokenizer
 from .features import FeatureMap
 
 
-class BaseRecData(pl.LightningDataModule):
+class TorchRecData(pl.LightningDataModule):
     def __init__(
         self,
         data_cfg,
@@ -162,7 +162,6 @@ class BaseRecData(pl.LightningDataModule):
         if not train_dir.exists():
             raise FileNotFoundError(f"No such file or directory: '{train_dir}'")
         self.sep = self.data_cfg.get('sep')
-        self.chunksize = self.data_cfg.get('chunksize')
         self.label_name = self.data_cfg['label_col']['name']
         if train_dir.suffix in ['.csv', '.txt']:
             self.columns = pd.read_csv(

@@ -11,10 +11,10 @@ embedding特征的处理方式：
 exam:
 1. read all data by chunksize  
 CPU times: user 5min 18s, sys: 5.38 s, total: 5min 24s
-Wall time: 5min 39s
+Wall time: 5min 39s  
 2. read all data directly  
 CPU times: user 5min 21s, sys: 54.8 s, total: 6min 16s
-Wall time: 6min 47s
+Wall time: 6min 47s  
 
 3. 
 ```python
@@ -23,7 +23,7 @@ with ThreadPoolExecutor(max_workers=20) as executor:
         executor.submit(self._fit_encoders, d)
 ```
 CPU times: user 3min 20s, sys: 4.36 s, total: 3min 24s
-Wall time: 3min 37s
+Wall time: 3min 37s  
 4. 
 ```python
 with ProcessPoolExecutor(max_workers=20) as executor:
@@ -31,14 +31,15 @@ with ProcessPoolExecutor(max_workers=20) as executor:
         executor.submit(self._fit_encoders, d)
 ```
 CPU times: user 2min 37s, sys: 5.78 s, total: 2min 43s
-Wall time: 2min 55s
+Wall time: 2min 55s  
 5. 
 ```python
 for d in data:
     self._fit_encoders(d)
 ```
 CPU times: user 3min 19s, sys: 4.41 s, total: 3min 24s
-Wall time: 3min 37s
-6. `import dask.dataframe as dd`
+Wall time: 3min 37s  
+6. 
+`import dask.dataframe as dd`  
 CPU times: user 8min 55s, sys: 46.6 s, total: 9min 42s
 Wall time: 2min 52s
