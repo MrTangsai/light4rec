@@ -20,6 +20,7 @@ class FeatureMap(
             'sequence_features',
             'input_length',
             'features_attr',
+            'label_attr',
         ],
     )
 ):
@@ -42,6 +43,7 @@ class FeatureMap(
         sequence_features=0,
         input_length=0,
         features_attr=OrderedDict(),
+        label_attr=dict(),
     ):
         return super().__new__(
             cls,
@@ -52,4 +54,5 @@ class FeatureMap(
             sequence_features,
             input_length,
             features_attr,
+            label_attr,
         )

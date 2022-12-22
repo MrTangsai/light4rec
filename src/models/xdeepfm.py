@@ -37,11 +37,15 @@ class xDeepFM(BaseModel):
         self.dnn_linear = nn.Linear(self.dnn_hidden_size[-1], 1, bias=False)
 
     def forward(self, x):
-        dense_value_list = [
-            x[:, v['index'][0]].view(-1, 1)
-            for v in self.features_attr.values()
-            if v['type'] == 'dense'
-        ]
+        dense_value_list = (
+            [
+                x[:, v['index'][0]].view(-1, 1)
+                for v in self.features_attr.values()
+                if v['type'] == 'dense'
+            ]
+            if self.featuremap.dense_features
+            else 0
+        )
         sparse_linear_embedding_list = [
             self.linear_embedding_dict[feat](x[:, v['index'][0]].view(-1, 1).long())
             for feat, v in self.features_attr.items()
@@ -50,7 +54,11 @@ class xDeepFM(BaseModel):
 
         sparse_embedding_cat = torch.cat(sparse_linear_embedding_list, dim=-1)
         sparse_feat_logit = torch.sum(sparse_embedding_cat, dim=-1, keepdim=False)
-        dense_value_logit = self.linear_dense(torch.cat(dense_value_list, dim=-1))
+        dense_value_logit = (
+            self.linear_dense(torch.cat(dense_value_list, dim=-1))
+            if self.featuremap.dense_features
+            else 0
+        )
         linear_logit = sparse_feat_logit + dense_value_logit
 
         sparse_embedding_list = [
@@ -62,13 +70,19 @@ class xDeepFM(BaseModel):
         cin_output = self.cin(cin_input)
         cin_logit = self.cin_linear(cin_output)
 
-        dnn_input = torch.cat(
-            [
-                torch.flatten(torch.cat(sparse_embedding_list, dim=1), start_dim=1),
-                torch.cat(dense_value_list, dim=1),
-            ],
-            dim=1,
-        )
+        if self.featuremap.dense_features:
+            dnn_input = torch.cat(
+                [
+                    torch.flatten(torch.cat(sparse_embedding_list, dim=1), start_dim=1),
+                    torch.cat(dense_value_list, dim=1),
+                ],
+                dim=1,
+            )
+        else:
+            dnn_input = torch.cat(
+                [torch.flatten(torch.cat(sparse_embedding_list, dim=1), start_dim=1)],
+                dim=1,
+            )
         dnn_output = self.dnn(dnn_input)
         dnn_logit = self.dnn_linear(dnn_output)
 

@@ -1,6 +1,6 @@
 import torch
 import pytorch_lightning as pl
-from src.dataset import BaseRecData
+from src.dataset import BaseRecData, TorchRecData
 from src.models import xDeepFM, IPNN
 
 from pytorch_lightning.callbacks import RichProgressBar
@@ -23,8 +23,8 @@ progress_bar = RichProgressBar(
 )
 device = torch.device('cuda:0')
 
-data = BaseRecData('cfg/data/criteo.yaml')
-model = xDeepFM(data.featuremap).double()
+data = TorchRecData('cfg/data/taobao.yml', 'features/featuremap')
+model = IPNN(data.featuremap).double()
 
 # train model
 trainer = pl.Trainer(
@@ -33,6 +33,7 @@ trainer = pl.Trainer(
     max_epochs=1,
     limit_train_batches=10,
     limit_val_batches=10,
+    limit_test_batches=10,
     callbacks=[
         progress_bar,
         RichModelSummary(),

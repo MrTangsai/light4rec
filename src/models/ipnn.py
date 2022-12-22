@@ -24,11 +24,15 @@ class IPNN(BaseModel):
         self.dnn_linear = nn.Linear(128, 1)
 
     def forward(self, x):
-        dense_value_list = [
-            x[:, v['index'][0]].view(-1, 1)
-            for v in self.features_attr.values()
-            if v['type'] == 'dense'
-        ]
+        dense_value_list = (
+            [
+                x[:, v['index'][0]].view(-1, 1)
+                for v in self.features_attr.values()
+                if v['type'] == 'dense'
+            ]
+            if self.featuremap.dense_features
+            else 0
+        )
 
         sparse_embedding_list = [
             self.embedding_dict[feat](x[:, v['index'][0]].view(-1, 1).long())
@@ -58,8 +62,10 @@ class IPNN(BaseModel):
 
         product_layer = torch.cat([linear_signal, inner_product], dim=1)
 
-        dnn_input = torch.cat(
-            [product_layer, torch.cat(dense_value_list, dim=1)], dim=1
+        dnn_input = (
+            torch.cat([product_layer, torch.cat(dense_value_list, dim=1)], dim=1)
+            if self.featuremap.dense_features
+            else torch.cat([product_layer], dim=1)
         )
 
         dnn_output = self.dnn(dnn_input)

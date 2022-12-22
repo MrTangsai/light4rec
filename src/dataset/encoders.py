@@ -17,6 +17,7 @@ class Tokenizer:
         na_value=None,
         oov_token=0,
         padding=False,
+        splitter=None,
         share_embedding=None,
     ) -> None:
         super().__init__()
@@ -24,6 +25,7 @@ class Tokenizer:
         self._na_value = na_value
         self.oov_token = oov_token
         self.use_padding = padding
+        self.splitter = splitter
         self.share_embedding = share_embedding
         self.word_counts = Counter()
 
@@ -31,9 +33,10 @@ class Tokenizer:
         self.word_counts.update(y.tolist())
 
     def partial_fit(self, y):
-        if not isinstance(y, np.ndarray):
-            y = y.compute()
-        self.word_counts.update(y.tolist())
+        if self.splitter:
+            self.word_counts.update(self.splitter.join(y).split(self.splitter))
+        else:
+            self.word_counts.update(y.tolist())
 
     def build_vocab(self):
         word_counts = sorted(self.word_counts.items(), key=lambda x: (-x[1], x[0]))

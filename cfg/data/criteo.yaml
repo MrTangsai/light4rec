@@ -1,7 +1,7 @@
 data_dir: data
 train_data: criteo_sample.txt
-sep: \t
-h5: False
+sep: "\t"
+chunksize: 1000000
 feature_cols:
   - {name: [I1,I2,I3,I4,I5,I6,I7,I8,I9,I10,I11,I12,I13],
           dtype: float, type: dense, encoder: MinMaxScaler}

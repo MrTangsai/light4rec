@@ -3,3 +3,6 @@ __pycache__
 lightning_logs/
 /*.py
 !main.py
+features/encoders.gz
+*.npy
+*.gz

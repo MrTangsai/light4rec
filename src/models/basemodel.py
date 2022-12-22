@@ -57,7 +57,10 @@ class BaseModel(pl.LightningModule):
                     if m['type'] == 'categorical'
                 }
             )
-            self.linear_dense = nn.Linear(self.featuremap.dense_features, 1, bias=False)
+            if self.featuremap.dense_features > 0:
+                self.linear_dense = nn.Linear(
+                    self.featuremap.dense_features, 1, bias=False
+                )
 
         self.loss = nn.BCEWithLogitsLoss(reduction='sum')
 
