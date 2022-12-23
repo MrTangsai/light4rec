@@ -6,3 +6,4 @@ lightning_logs/
 features/encoders.gz
 *.npy
 *.gz
+.vscode
