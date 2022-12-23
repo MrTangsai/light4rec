@@ -18,6 +18,7 @@ class Tokenizer:
         oov_token=0,
         padding=False,
         splitter=None,
+        max_len=None,
         share_embedding=None,
     ) -> None:
         super().__init__()
@@ -26,6 +27,7 @@ class Tokenizer:
         self.oov_token = oov_token
         self.use_padding = padding
         self.splitter = splitter
+        self.max_len = max_len
         self.share_embedding = share_embedding
         self.word_counts = Counter()
 
@@ -58,3 +60,16 @@ class Tokenizer:
     def encode_category(self, categories):
         category_indices = [[self.vocab.get(x, self.oov_token)] for x in categories]
         return np.array(category_indices)
+
+    def encode_sequence(self, texts):
+        sequence_list = [
+            [self.vocab.get(x, self.oov_token) for x in text.split(self.splitter)]
+            for text in texts
+        ]
+        sequence_list = [
+            sequence[: self.max_len]
+            if len(sequence) >= self.max_len
+            else sequence + (self.max_len - len(sequence)) * [self.vocab_size - 1]
+            for sequence in sequence_list
+        ]
+        return np.array(sequence_list)

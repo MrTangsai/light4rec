@@ -42,10 +42,16 @@ class TorchRecData(pl.LightningDataModule):
             self.process_dir = Path(self.process_dir)
         else:
             self.process_dir = None
-        if fm_path:
-            self.load(fm_path)
+        self.fm_path = Path(fm_path)
+        if (
+            self.fm_path.joinpath('featuremap.json').exists()
+            and self.fm_path.joinpath('encoders.gz').exists()
+        ):
+            self._load_featuremap()
         else:
             self._extract_featuremap()
+            self._dump_featuremap()
+
         self.batch_size = batch_size
         self.var_batch_size = var_batch_size
         self.data_train = None
@@ -153,6 +159,7 @@ class TorchRecData(pl.LightningDataModule):
                             padding=True,
                             share_embedding=cols.get('share_embedding'),
                             splitter=cols.get('splitter'),
+                            max_len=cols.get('max_len'),
                         )
                         if cols.get('share_embedding'):
                             self.encoders[cols['share_embedding']].padding = True
@@ -233,7 +240,6 @@ class TorchRecData(pl.LightningDataModule):
                     for index, (col, fm) in enumerate(
                         self.featuremap.features_attr.items()
                     )
-                    if fm['type'] != 'sequence'
                 }
                 for future in as_completed(futures_to_index):
                     index = futures_to_index[future]
@@ -293,9 +299,12 @@ class TorchRecData(pl.LightningDataModule):
             out[np.where(out == '')] = '-1'
             if col in self.encoders:
                 out = self.encoders[col].encode_category(out.astype(attr['dtype']))
+        elif attr['type'] == 'sequence':
+            out[np.where(out == '')] = '-1'
+            if col in self.encoders:
+                out = self.encoders[col].encode_sequence(out.astype(attr['dtype']))
         else:
-            # out = out.reshape(-1, 1)
-            pass
+            raise NotImplementedError
         return out
 
     def train_dataloader(self):
@@ -319,19 +328,20 @@ class TorchRecData(pl.LightningDataModule):
                 "'{}' object has no attribute '{}'".format(type(self).__name__, name)
             )
 
-    def dump(self, path):
+    def _dump_featuremap(self):
         joblib.dump(
-            self.encoders, open(Path(path).joinpath('encoders.gz'), 'wb'), compress=3
+            self.encoders, open(self.fm_path.joinpath('encoders.gz'), 'wb'), compress=3
         )
         json.dump(
-            self.featuremap._asdict(), open(Path(path).joinpath('featuremap.json'), 'w')
+            self.featuremap._asdict(),
+            open(self.fm_path.joinpath('featuremap.json'), 'w'),
         )
 
-    def load(self, path):
+    def _load_featuremap(self):
         self.featuremap = FeatureMap(
-            **json.load(open(Path(path).joinpath('featuremap.json'), 'r'))
+            **json.load(open(self.fm_path.joinpath('featuremap.json'), 'r'))
         )
-        self.encoders = joblib.load(open(Path(path).joinpath('encoders.gz'), 'rb'))
+        self.encoders = joblib.load(open(self.fm_path.joinpath('encoders.gz'), 'rb'))
 
 
 def print_thread(pos='start'):
